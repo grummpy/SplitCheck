@@ -7,7 +7,9 @@ none of their visits are copies.
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
+import math
 
 import numpy as np
 import pandas as pd
@@ -97,6 +99,8 @@ def _validate_inputs(
         raise ValueError("train and test must each contain at least one row")
     if not columns:
         raise ValueError("feature_columns must name at least one column")
+    if not math.isfinite(exact_atol) or not math.isfinite(near_atol):
+        raise ValueError("tolerances must be finite")
     if exact_atol < 0 or near_atol < 0:
         raise ValueError("tolerances must be non-negative")
     if exact_atol > near_atol:
@@ -132,10 +136,32 @@ def _require_same_kinds(test: pd.DataFrame, numeric: list[str], categorical: lis
             raise ValueError(f"column {name} is non-numeric in train and numeric in test")
 
 
-def _keys(frame: pd.DataFrame, categorical: list[str]) -> np.ndarray:
+def _typed_categorical_value(value: object) -> Hashable:
+    """Make categorical equality explicit without flattening types to strings."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    value_type = (type(value).__module__, type(value).__qualname__)
+    try:
+        hash(value)
+    except TypeError:
+        raise ValueError("categorical feature values must be hashable") from None
+    return (*value_type, value)  # type: ignore[return-value]
+
+
+def _keys(frame: pd.DataFrame, categorical: list[str]) -> list[tuple[Hashable, ...]]:
     if not categorical:
-        return np.zeros(len(frame), dtype=np.int8)
-    return frame[categorical].astype(str).agg("\0".join, axis=1).to_numpy()
+        return [tuple()] * len(frame)
+    return [
+        tuple(_typed_categorical_value(value) for value in row)
+        for row in frame[categorical].itertuples(index=False, name=None)
+    ]
+
+
+def _positions_by_key(keys: list[tuple[Hashable, ...]]) -> dict[tuple[Hashable, ...], list[int]]:
+    positions: dict[tuple[Hashable, ...], list[int]] = {}
+    for position, key in enumerate(keys):
+        positions.setdefault(key, []).append(position)
+    return positions
 
 
 def _duplicate_pairs(
@@ -146,24 +172,25 @@ def _duplicate_pairs(
     exact_atol: float,
     near_atol: float,
 ) -> tuple[list[tuple[int, int]], list[tuple[int, int, float]]]:
-    train_keys = _keys(train, categorical)
-    test_keys = _keys(test, categorical)
+    train_positions_by_key = _positions_by_key(_keys(train, categorical))
+    test_positions_by_key = _positions_by_key(_keys(test, categorical))
     train_num = train[numeric].to_numpy(dtype=np.float64) if numeric else None
     test_num = test[numeric].to_numpy(dtype=np.float64) if numeric else None
+    if train_num is not None and (not np.isfinite(train_num).all() or not np.isfinite(test_num).all()):
+        raise ValueError("numeric feature columns must contain only finite values")
     exact: list[tuple[int, int]] = []
     near: list[tuple[int, int, float]] = []
-    for key in pd.unique(test_keys):
-        test_pos = np.flatnonzero(test_keys == key)
-        train_pos = np.flatnonzero(train_keys == key)
-        if len(train_pos) == 0:
+    for key, test_pos in test_positions_by_key.items():
+        train_pos = train_positions_by_key.get(key)
+        if not train_pos:
             continue
         if train_num is None or test_num is None:
             for test_index in test_pos:
                 exact.append((int(test_index), int(train_pos[0])))
             continue
         neighbors = NearestNeighbors(n_neighbors=1, metric="chebyshev", algorithm="brute")
-        neighbors.fit(train_num[train_pos])
-        distances, indices = neighbors.kneighbors(test_num[test_pos], return_distance=True)
+        neighbors.fit(train_num[np.asarray(train_pos)])
+        distances, indices = neighbors.kneighbors(test_num[np.asarray(test_pos)], return_distance=True)
         for local_i, test_index in enumerate(test_pos):
             distance = float(distances[local_i, 0])
             train_index = int(train_pos[int(indices[local_i, 0])])

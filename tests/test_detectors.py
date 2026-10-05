@@ -41,6 +41,39 @@ def test_categorical_mismatch_blocks_an_otherwise_exact_row():
     assert audit.has_leakage is False
 
 
+def test_categorical_keys_preserve_types_and_column_boundaries():
+    train = pd.DataFrame({
+        "value": [1.0, 2.0, 3.0, 4.0],
+        "category": pd.Series([1, True, "1", "alpha\0beta"], dtype=object),
+        "second": pd.Series(["x", "x", "x", "gamma"], dtype=object),
+    })
+    test = pd.DataFrame({
+        "value": [1.0, 1.0, 2.0, 4.0, 4.0],
+        "category": pd.Series(["1", 1, True, "alpha", "alpha\0beta"], dtype=object),
+        "second": pd.Series(["x", "x", "x", "beta\0gamma", "gamma"], dtype=object),
+    })
+
+    audit = audit_split(train, test, feature_columns=["value", "category", "second"])
+
+    # "1", 1, and True are different categorical values; embedded NUL bytes
+    # cannot make two columns look like one serialized string key.
+    assert audit.exact_pairs == ((1, 0), (2, 1), (4, 3))
+
+
+@pytest.mark.parametrize("tolerance", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_tolerance_is_an_error(tolerance):
+    frame = pd.DataFrame({"x0": [1.0, 2.0]})
+    with pytest.raises(ValueError, match="finite"):
+        audit_split(frame, frame, feature_columns=["x0"], near_atol=tolerance)
+
+
+def test_nonfinite_numeric_feature_is_an_error():
+    train = pd.DataFrame({"x0": [1.0, np.inf]})
+    test = pd.DataFrame({"x0": [1.0, 2.0]})
+    with pytest.raises(ValueError, match="finite values"):
+        audit_split(train, test, feature_columns=["x0"])
+
+
 def test_shared_groups_are_reported_when_rows_are_not_copies():
     train = pd.DataFrame({"x0": [0.0, 1.0, 2.0], "patient_id": ["A", "B", "C"]})
     test = pd.DataFrame({"x0": [10.0, 11.0, 12.0], "patient_id": ["B", "C", "D"]})
