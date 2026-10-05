@@ -67,3 +67,15 @@ def test_audit_rejects_a_missing_file(tmp_path, capsys):
     status = main(["audit", "--train", str(tmp_path / "missing.csv"), "--test", str(tmp_path / "also.csv")])
     assert status == 1
     assert "splitcheck:" in capsys.readouterr().err
+
+
+def test_audit_rejects_default_schema_loss_and_allows_an_explicit_subset(tmp_path, capsys):
+    train = tmp_path / "train.csv"
+    test = tmp_path / "test.csv"
+    pd.DataFrame({"x": [1.0], "z": [2.0]}).to_csv(train, index=False)
+    pd.DataFrame({"x": [1.0]}).to_csv(test, index=False)
+
+    assert main(["audit", "--train", str(train), "--test", str(test)]) == 1
+    assert "missing from test: z" in capsys.readouterr().err
+
+    assert main(["audit", "--train", str(train), "--test", str(test), "--features", "x"]) == 0

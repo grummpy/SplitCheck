@@ -99,7 +99,18 @@ def _feature_columns(
             raise ValueError("--features did not contain any column names")
         return names
     excluded = {name for name in (group, target) if name}
-    names = [column for column in train.columns if column in test.columns and column not in excluded]
+    train_features = [column for column in train.columns if column not in excluded]
+    test_features = [column for column in test.columns if column not in excluded]
+    missing_from_test = [column for column in train_features if column not in test_features]
+    extra_in_test = [column for column in test_features if column not in train_features]
+    if missing_from_test or extra_in_test:
+        details = []
+        if missing_from_test:
+            details.append(f"missing from test: {', '.join(missing_from_test)}")
+        if extra_in_test:
+            details.append(f"extra in test: {', '.join(extra_in_test)}")
+        raise ValueError("train/test feature schemas differ (" + "; ".join(details) + ")")
+    names = train_features
     if not names:
         raise ValueError("no feature columns left after excluding the group and target")
     return names
