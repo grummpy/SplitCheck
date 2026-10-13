@@ -117,6 +117,7 @@ def render_audit(audit: SplitAudit, title: str = "SplitCheck audit") -> str:
         f"- Exact duplicate test rows: {audit.exact_duplicate_rows}",
         f"- Near-duplicate test rows: {audit.near_duplicate_rows} (Chebyshev atol {audit.near_atol:g})",
         f"- Overlapping groups: {len(audit.overlapping_groups)}",
+        f"- Group equality: {audit.group_equality_rule or 'not checked'}",
         f"- Train rows in those groups: {audit.train_rows_with_overlapping_group}",
         f"- Test rows in those groups: {audit.test_rows_with_overlapping_group}",
     ]
