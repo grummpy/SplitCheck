@@ -85,11 +85,14 @@ def test_shared_groups_are_reported_when_rows_are_not_copies():
     assert audit.train_rows_with_overlapping_group == 2
 
 
-def test_integer_group_ids_are_compared_as_strings():
+def test_group_ids_preserve_types_and_ignore_missing_values():
     train = pd.DataFrame({"x0": [0.0], "patient_id": [7]})
-    test = pd.DataFrame({"x0": [5.0], "patient_id": [7]})
+    test = pd.DataFrame({"x0": [5.0, 6.0, 7.0], "patient_id": ["7", 7, None]})
     audit = audit_split(train, test, feature_columns=["x0"], group_column="patient_id")
-    assert audit.overlapping_groups == ("7",)
+    assert audit.overlapping_groups == ("int:7",)
+    assert audit.train_rows_with_overlapping_group == 1
+    assert audit.test_rows_with_overlapping_group == 1
+    assert audit.group_equality_rule == "typed; missing values never overlap"
 
 
 def test_separated_rows_raise_no_alarm():

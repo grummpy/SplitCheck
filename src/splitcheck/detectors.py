@@ -33,6 +33,7 @@ class SplitAudit:
     exact_pairs: tuple[tuple[int, int], ...]
     near_pairs: tuple[tuple[int, int, float], ...]
     overlapping_groups: tuple[str, ...]
+    group_equality_rule: str | None
     train_rows_with_overlapping_group: int
     test_rows_with_overlapping_group: int
 
@@ -59,7 +60,11 @@ def audit_split(
     categorical feature and lies within ``exact_atol`` (Chebyshev) on the
     numeric features. It is a near-duplicate when it is not exact and the
     numeric distance is within ``near_atol``. Categorical features must match
-    exactly in both cases. Group ids are compared as strings.
+    exactly in both cases. Group ids use the same typed equality rule as
+    categorical features: ``1`` and ``"1"`` are distinct identifiers. CSV
+    readers naturally supply string ids, while callers passing data frames can
+    retain typed identifiers. Missing group ids are not identifiers and never
+    overlap.
     """
     columns = tuple(feature_columns)
     _validate_inputs(train, test, columns, group_column, near_atol, exact_atol)
@@ -82,6 +87,7 @@ def audit_split(
         exact_pairs=tuple(exact_pairs),
         near_pairs=tuple(near_pairs),
         overlapping_groups=tuple(overlap),
+        group_equality_rule=("typed; missing values never overlap" if group_column else None),
         train_rows_with_overlapping_group=train_overlap_rows,
         test_rows_with_overlapping_group=test_overlap_rows,
     )
@@ -203,17 +209,36 @@ def _duplicate_pairs(
     return exact, near
 
 
+def _display_group(value: object) -> str:
+    """Render a typed group id without making its display value its key."""
+    if isinstance(value, np.generic):
+        value = value.item()
+    return f"{type(value).__name__}:{value}"
+
+
 def _group_overlap(
     train: pd.DataFrame, test: pd.DataFrame, group_column: str | None
 ) -> tuple[list[str], int, int]:
     if group_column is None:
         return [], 0, 0
-    train_groups = train[group_column].astype(str)
-    test_groups = test[group_column].astype(str)
-    overlap = sorted(set(train_groups) & set(test_groups))
-    overlap_set = set(overlap)
+    train_values = train[group_column].tolist()
+    test_values = test[group_column].tolist()
+    train_groups = [
+        _typed_categorical_value(value) if not pd.isna(value) else None for value in train_values
+    ]
+    test_groups = [
+        _typed_categorical_value(value) if not pd.isna(value) else None for value in test_values
+    ]
+    overlap_set = set(train_groups) & set(test_groups)
+    overlap_set.discard(None)
+    labels = {
+        key: _display_group(value)
+        for key, value in zip(train_groups + test_groups, train_values + test_values)
+        if key in overlap_set
+    }
+    overlap = sorted(labels[key] for key in overlap_set)
     return (
         overlap,
-        int(train_groups.isin(overlap_set).sum()),
-        int(test_groups.isin(overlap_set).sum()),
+        sum(group in overlap_set for group in train_groups),
+        sum(group in overlap_set for group in test_groups),
     )

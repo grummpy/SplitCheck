@@ -71,7 +71,7 @@ python -m splitcheck audit \
   --target y
 ```
 
-`--strict` exits with status 1 when any leakage is found. Near-copies use a Chebyshev tolerance of `0.001` on the numeric features (`--near-atol`). Categorical features have to match exactly.
+`--strict` exits with status 1 when any leakage is found. Near-copies use a Chebyshev tolerance of `0.001` on the numeric features (`--near-atol`). Categorical features have to match exactly. Group identifiers also use typed equality: an in-memory integer `1` is distinct from the string `"1"`, and missing group identifiers never overlap. CSV input represents ids as parsed CSV values, so preserve leading-zero ids with an appropriate CSV dtype when that distinction matters.
 
 ## Layout
 
