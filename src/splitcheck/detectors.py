@@ -213,7 +213,7 @@ def _display_group(value: object) -> str:
     """Render a typed group id without making its display value its key."""
     if isinstance(value, np.generic):
         value = value.item()
-    return f"{type(value).__name__}:{value}"
+    return value if isinstance(value, str) else f"{type(value).__name__}:{value}"
 
 
 def _group_overlap(
